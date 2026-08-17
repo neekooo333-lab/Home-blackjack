@@ -1,0 +1,4355 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
+import {
+
+  SafeAreaView,
+
+  View,
+
+  Text,
+
+  Pressable,
+
+  StyleSheet,
+
+  PanResponder,
+
+  Animated,
+
+  Alert,
+
+  ScrollView,
+
+} from "react-native";
+
+const SUITS = ["♠", "♥", "♦", "♣"];
+
+const RANKS = [
+
+  "A",
+
+  "2",
+
+  "3",
+
+  "4",
+
+  "5",
+
+  "6",
+
+  "7",
+
+  "8",
+
+  "9",
+
+  "10",
+
+  "J",
+
+  "Q",
+
+  "K",
+
+];
+
+const isRed = (card) =>
+
+  card.suit === "♥" || card.suit === "♦";
+
+const isBlackJack = (card) =>
+
+  card.rank === "J" && !isRed(card);
+
+const isRedJack = (card) =>
+
+  card.rank === "J" && isRed(card);
+
+function makeDeck() {
+
+  const deck = [];
+
+  SUITS.forEach((suit) => {
+
+    RANKS.forEach((rank) => {
+
+      deck.push({
+
+        suit,
+
+        rank,
+
+        id: `${suit}-${rank}-${Math.random()}`,
+
+      });
+
+    });
+
+  });
+
+  return deck;
+
+}
+
+function shuffle(cards) {
+
+  const result = [...cards];
+
+  for (let i = result.length - 1; i > 0; i--) {
+
+    const j = Math.floor(Math.random() * (i + 1));
+
+    [result[i], result[j]] = [
+
+      result[j],
+
+      result[i],
+
+    ];
+
+  }
+
+  return result;
+
+}
+
+function Card({
+
+  card,
+
+  back = false,
+
+  small = false,
+
+  selected = false,
+
+}) {
+
+  if (back) {
+
+    return (
+
+      <View
+
+        style={[
+
+          styles.card,
+
+          small && styles.smallCard,
+
+          styles.cardBack,
+
+        ]}
+
+      >
+
+        <Text style={styles.backMark}>♠</Text>
+
+        <Text style={styles.backMarkSmall}>HOME</Text>
+
+      </View>
+
+    );
+
+  }
+
+  return (
+
+    <View
+
+      style={[
+
+        styles.card,
+
+        small && styles.smallCard,
+
+        selected && styles.selectedCard,
+
+      ]}
+
+    >
+
+      <Text
+
+        style={[
+
+          styles.rank,
+
+          isRed(card) && styles.red,
+
+        ]}
+
+      >
+
+        {card.rank}
+
+      </Text>
+
+      <Text
+
+        style={[
+
+          styles.suit,
+
+          isRed(card) && styles.red,
+
+        ]}
+
+      >
+
+        {card.suit}
+
+      </Text>
+
+      <Text
+
+        style={[
+
+          styles.cornerSuit,
+
+          isRed(card) && styles.red,
+
+        ]}
+
+      >
+
+        {card.suit}
+
+      </Text>
+
+    </View>
+
+  );
+
+}
+
+function DraggableCard({
+
+  card,
+
+  index,
+
+  selected,
+
+  onPlay,
+
+  onMove,
+
+  onSelect,
+
+}) {
+
+  const pan = useRef(
+
+    new Animated.ValueXY({
+
+      x: 0,
+
+      y: 0,
+
+    })
+
+  ).current;
+
+  const [dragging, setDragging] = useState(false);
+
+  const responder = useMemo(
+
+    () =>
+
+      PanResponder.create({
+
+        onStartShouldSetPanResponder: () => true,
+
+        onMoveShouldSetPanResponder: () => true,
+
+        onPanResponderGrant: () => {
+
+          setDragging(true);
+
+        },
+
+        onPanResponderMove: (_, gesture) => {
+
+          pan.setValue({
+
+            x: gesture.dx,
+
+            y: gesture.dy,
+
+          });
+
+        },
+
+        onPanResponderRelease: (_, gesture) => {
+
+          setDragging(false);
+
+          pan.setValue({
+
+            x: 0,
+
+            y: 0,
+
+          });
+
+          if (gesture.dy < -70) {
+
+            onPlay(card);
+
+            return;
+
+          }
+
+          if (Math.abs(gesture.dx) > 30) {
+
+            onMove(index, gesture.dx);
+
+            return;
+
+          }
+
+          onSelect(card.id);
+
+        },
+
+      }),
+
+    [
+
+      card,
+
+      index,
+
+      onPlay,
+
+      onMove,
+
+      onSelect,
+
+    ]
+
+  );
+
+  return (
+
+    <Animated.View
+
+      {...responder.panHandlers}
+
+      style={[
+
+        styles.dragCard,
+
+        dragging && styles.draggingCard,
+
+        {
+
+          transform: pan.getTranslateTransform(),
+
+        },
+
+      ]}
+
+    >
+
+      <Card
+
+        card={card}
+
+        selected={selected}
+
+      />
+
+    </Animated.View>
+
+  );
+
+}
+
+function Rule({ title, text }) {
+
+  return (
+
+    <View style={styles.ruleCard}>
+
+      <Text style={styles.ruleCardTitle}>
+
+        {title}
+
+      </Text>
+
+      <Text style={styles.ruleCardText}>
+
+        {text}
+
+      </Text>
+
+    </View>
+
+  );
+
+}
+
+export default function App() {
+
+  const [screen, setScreen] = useState("home");
+
+  const [mode, setMode] = useState("cpu");
+
+  const [playerCount, setPlayerCount] = useState(2);
+
+  const [players, setPlayers] = useState([]);
+
+  const [deck, setDeck] = useState([]);
+
+  const [discard, setDiscard] = useState([]);
+
+  const [turn, setTurn] = useState(0);
+
+  const [direction, setDirection] = useState(1);
+
+  const [twoPenalty, setTwoPenalty] = useState(0);
+
+  const [twoChain, setTwoChain] = useState(0);
+
+  const [jackPenalty, setJackPenalty] = useState(0);
+
+  const [chosenSuit, setChosenSuit] = useState(null);
+
+  /*
+
+   * QUEEN RULE
+
+   *
+
+   * When a player plays a Queen:
+
+   *
+
+   * - That same player keeps the turn.
+
+   * - They must cover the Queen with any card.
+
+   * - A run may also be used.
+
+   * - The next player does NOT get the free cover.
+
+   * - A Queen cannot be the final winning card.
+
+   * - If the Queen was the player's last card,
+
+   *   they must pick up 1 card and continue.
+
+   */
+
+  const [queenCoverTurn, setQueenCoverTurn] =
+
+    useState(false);
+
+  const [message, setMessage] = useState("");
+
+  const [scores, setScores] = useState([]);
+
+  const [roundOver, setRoundOver] = useState(false);
+
+  const [gameWinner, setGameWinner] = useState(null);
+
+  const [selectedCards, setSelectedCards] =
+
+    useState([]);
+
+  const topCard = discard.length
+
+    ? discard[discard.length - 1]
+
+    : null;
+
+  const current = players.length
+
+    ? players[turn]
+
+    : null;
+
+  const humanTurn = turn === 0;
+
+  function startGame(selectedMode = mode) {
+
+    const count =
+
+      selectedMode === "cpu"
+
+        ? 2
+
+        : playerCount;
+
+    let cards = shuffle(makeDeck());
+
+    const newPlayers = [];
+
+    for (let i = 0; i < count; i++) {
+
+      newPlayers.push({
+
+        name:
+
+          i === 0
+
+            ? "You"
+
+            : `CPU ${i}`,
+
+        hand: cards.splice(0, 7),
+
+        lastCalled: false,
+
+      });
+
+    }
+
+    const firstCard = cards.shift();
+
+    setMode(selectedMode);
+
+    setPlayers(newPlayers);
+
+    setDeck(cards);
+
+    setDiscard([firstCard]);
+
+    setTurn(0);
+
+    setDirection(1);
+
+    setTwoPenalty(0);
+
+    setTwoChain(0);
+
+    setJackPenalty(0);
+
+    setChosenSuit(null);
+
+    setQueenCoverTurn(false);
+
+    setSelectedCards([]);
+
+    setScores(
+
+      new Array(count).fill(0)
+
+    );
+
+    setRoundOver(false);
+
+    setGameWinner(null);
+
+    setMessage(
+
+      `${firstCard.rank}${firstCard.suit} is showing. You start.`
+
+    );
+
+    setScreen("game");
+
+  }
+
+  function leaveGame() {
+
+    Alert.alert(
+
+      "Leave game?",
+
+      "Your current game will be lost.",
+
+      [
+
+        {
+
+          text: "Cancel",
+
+          style: "cancel",
+
+        },
+
+        {
+
+          text: "Yes, go Home",
+
+          style: "destructive",
+
+          onPress: () => {
+
+            setScreen("home");
+
+            setSelectedCards([]);
+
+            setRoundOver(false);
+
+            setQueenCoverTurn(false);
+
+          },
+
+        },
+
+      ]
+
+    );
+
+  }
+
+  function getNextPlayer(
+
+    from,
+
+    playDirection = direction,
+
+    skip = false
+
+  ) {
+
+    if (!players.length) return 0;
+
+    let next =
+
+      from +
+
+      playDirection *
+
+        (skip ? 2 : 1);
+
+    while (next < 0) {
+
+      next += players.length;
+
+    }
+
+    while (next >= players.length) {
+
+      next -= players.length;
+
+    }
+
+    return next;
+
+  }
+
+  function finishRound(winnerIndex) {
+
+    const newScores = [...scores];
+
+    newScores[winnerIndex] +=
+
+      players.length - 1;
+
+    setScores(newScores);
+
+    const target =
+
+      players.length === 2
+
+        ? 10
+
+        : players.length === 3
+
+        ? 11
+
+        : 12;
+
+    if (
+
+      newScores[winnerIndex] >= target
+
+    ) {
+
+      setGameWinner(
+
+        players[winnerIndex].name
+
+      );
+
+    }
+
+    setRoundOver(true);
+
+  }
+
+  function canPlaySingle(
+
+    card,
+
+    currentTop = topCard,
+
+    activeTwo = twoPenalty,
+
+    activeJack = jackPenalty,
+
+    suitChoice = chosenSuit,
+
+    freeQueenCover = queenCoverTurn
+
+  ) {
+
+    if (!currentTop) return false;
+
+    /*
+
+     * Queen cover is completely free.
+
+     */
+
+    if (freeQueenCover) {
+
+      return true;
+
+    }
+
+    /*
+
+     * 2 penalty.
+
+     */
+
+    if (activeTwo > 0) {
+
+      return card.rank === "2";
+
+    }
+
+    /*
+
+     * Jack penalty.
+
+     */
+
+    if (activeJack > 0) {
+
+      return card.rank === "J";
+
+    }
+
+    /*
+
+     * Ace suit choice.
+
+     *
+
+     * The next player must follow
+
+     * the chosen suit, unless they play
+
+     * another Ace.
+
+     */
+
+    if (suitChoice) {
+
+      if (card.rank === "A") {
+
+        return true;
+
+      }
+
+      return card.suit === suitChoice;
+
+    }
+
+    /*
+
+     * Normal Ace.
+
+     */
+
+    if (card.rank === "A") {
+
+      return true;
+
+    }
+
+    /*
+
+     * Same rank.
+
+     */
+
+    if (
+
+      card.rank === currentTop.rank
+
+    ) {
+
+      return true;
+
+    }
+
+    /*
+
+     * Same suit.
+
+     */
+
+    if (
+
+      card.suit === currentTop.suit
+
+    ) {
+
+      return true;
+
+    }
+
+    return false;
+
+  }
+
+  function canPlaySequence(cards) {
+
+    if (!cards.length) return false;
+
+    let currentTop = topCard;
+
+    let activeTwo = twoPenalty;
+
+    let activeJack = jackPenalty;
+
+    let suitChoice = chosenSuit;
+
+    let freeQueenCover =
+
+      queenCoverTurn;
+
+    for (const card of cards) {
+
+      if (
+
+        !canPlaySingle(
+
+          card,
+
+          currentTop,
+
+          activeTwo,
+
+          activeJack,
+
+          suitChoice,
+
+          freeQueenCover
+
+        )
+
+      ) {
+
+        return false;
+
+      }
+
+      /*
+
+       * The free Queen cover only applies
+
+       * to the FIRST card played after Queen.
+
+       */
+
+      if (freeQueenCover) {
+
+        freeQueenCover = false;
+
+      }
+
+      if (activeTwo > 0) {
+
+        if (card.rank !== "2") {
+
+          return false;
+
+        }
+
+        activeTwo = Math.min(
+
+          activeTwo + 2,
+
+          8
+
+        );
+
+      } else if (activeJack > 0) {
+
+        if (card.rank !== "J") {
+
+          return false;
+
+        }
+
+        if (isRedJack(card)) {
+
+          activeJack = 0;
+
+        } else {
+
+          activeJack += 6;
+
+        }
+
+      } else if (
+
+        card.rank === "2"
+
+      ) {
+
+        activeTwo = 2;
+
+      } else if (
+
+        card.rank === "J" &&
+
+        isBlackJack(card)
+
+      ) {
+
+        activeJack = 6;
+
+      }
+
+      /*
+
+       * Ace requires a new suit choice.
+
+       */
+
+      if (card.rank === "A") {
+
+        suitChoice = null;
+
+      }
+
+      currentTop = card;
+
+    }
+
+    return true;
+
+  }
+
+  function selectCard(id) {
+
+    if (!humanTurn) return;
+
+    setSelectedCards(
+
+      (previous) =>
+
+        previous.includes(id)
+
+          ? previous.filter(
+
+              (item) => item !== id
+
+            )
+
+          : [
+
+              ...previous,
+
+              id,
+
+            ]
+
+    );
+
+  }
+
+  function moveCard(
+
+    fromIndex,
+
+    distance
+
+  ) {
+
+    if (!current) return;
+
+    let toIndex =
+
+      fromIndex +
+
+      (distance > 0 ? 1 : -1);
+
+    toIndex = Math.max(
+
+      0,
+
+      Math.min(
+
+        current.hand.length - 1,
+
+        toIndex
+
+      )
+
+    );
+
+    if (toIndex === fromIndex) {
+
+      return;
+
+    }
+
+    const hand = [...current.hand];
+
+    const moved = hand.splice(
+
+      fromIndex,
+
+      1
+
+    )[0];
+
+    hand.splice(
+
+      toIndex,
+
+      0,
+
+      moved
+
+    );
+
+    setPlayers(
+
+      players.map(
+
+        (player, index) =>
+
+          index === turn
+
+            ? {
+
+                ...player,
+
+                hand,
+
+              }
+
+            : player
+
+      )
+
+    );
+
+  }
+
+  function drawCards(amount = 1) {
+
+    let available = [...deck];
+
+    if (available.length < amount) {
+
+      available = [
+
+        ...available,
+
+        ...shuffle(
+
+          discard.slice(0, -1)
+
+        ),
+
+      ];
+
+      if (topCard) {
+
+        setDiscard([topCard]);
+
+      }
+
+    }
+
+    const cards = available.slice(
+
+      0,
+
+      amount
+
+    );
+
+    setDeck(
+
+      available.slice(
+
+        cards.length
+
+      )
+
+    );
+
+    setPlayers(
+
+      players.map(
+
+        (player, index) =>
+
+          index === turn
+
+            ? {
+
+                ...player,
+
+                hand: [
+
+                  ...player.hand,
+
+                  ...cards,
+
+                ],
+
+              }
+
+            : player
+
+      )
+
+    );
+
+    setTwoPenalty(0);
+
+    setTwoChain(0);
+
+    setJackPenalty(0);
+
+    setChosenSuit(null);
+
+    /*
+
+     * SPECIAL QUEEN RULE:
+
+     *
+
+     * If the player has just played a Queen
+
+     * as their last card, they must pick up
+
+     * one card and remain on the same turn.
+
+     *
+
+     * They can then cover the Queen.
+
+     */
+
+    if (queenCoverTurn) {
+
+      setSelectedCards([]);
+
+      setMessage(
+
+        `${current.name} had no card to cover the Queen — picked up ${cards.length} card${cards.length === 1 ? "" : "s"}. Cover the Queen.`
+
+      );
+
+      return;
+
+    }
+
+    setQueenCoverTurn(false);
+
+    setSelectedCards([]);
+
+    const next = getNextPlayer(
+
+      turn,
+
+      direction
+
+    );
+
+    setTurn(next);
+
+    setMessage(
+
+      `${current.name} picked up ${cards.length} card${cards.length === 1 ? "" : "s"}. ${players[next]?.name || "Next player"}'s turn.`
+
+    );
+
+  }
+
+  function playSequence(
+
+    cards,
+
+    actorName = null
+
+  ) {
+
+    if (
+
+      !current ||
+
+      !cards.length
+
+    ) {
+
+      return;
+
+    }
+
+    if (!canPlaySequence(cards)) {
+
+      setMessage(
+
+        "Those cards cannot be played together."
+
+      );
+
+      return;
+
+    }
+
+    const ids = cards.map(
+
+      (card) => card.id
+
+    );
+
+    const newHand =
+
+      current.hand.filter(
+
+        (card) =>
+
+          !ids.includes(card.id)
+
+      );
+
+    setPlayers(
+
+      players.map(
+
+        (player, index) =>
+
+          index === turn
+
+            ? {
+
+                ...player,
+
+                hand: newHand,
+
+              }
+
+            : player
+
+      )
+
+    );
+
+    setDiscard([
+
+      ...discard,
+
+      ...cards,
+
+    ]);
+
+    setSelectedCards([]);
+
+    let newTwo = twoPenalty;
+
+    let newTwoChain = twoChain;
+
+    let newJack = jackPenalty;
+
+    let newDirection =
+
+      direction;
+
+    let redJackCancelled =
+
+      false;
+
+    let blackJackPlayed =
+
+      false;
+
+    let twoPlayed = false;
+
+    let kingPlayed = false;
+
+    let eightPlayed = false;
+
+    let acePlayed = false;
+
+    let queenPlayed = false;
+
+    for (const card of cards) {
+
+      if (card.rank === "2") {
+
+        twoPlayed = true;
+
+        newTwo =
+
+          newTwo > 0
+
+            ? Math.min(
+
+                newTwo + 2,
+
+                8
+
+              )
+
+            : 2;
+
+        newTwoChain++;
+
+      } else if (
+
+        card.rank === "J"
+
+      ) {
+
+        if (
+
+          newJack > 0 &&
+
+          isRedJack(card)
+
+        ) {
+
+          newJack = 0;
+
+          redJackCancelled = true;
+
+        } else if (
+
+          isBlackJack(card)
+
+        ) {
+
+          blackJackPlayed = true;
+
+          newJack =
+
+            newJack > 0
+
+              ? newJack + 6
+
+              : 6;
+
+        }
+
+      } else if (
+
+        card.rank === "K"
+
+      ) {
+
+        kingPlayed = true;
+
+        newDirection *= -1;
+
+      } else if (
+
+        card.rank === "8"
+
+      ) {
+
+        eightPlayed = true;
+
+      } else if (
+
+        card.rank === "A"
+
+      ) {
+
+        acePlayed = true;
+
+      } else if (
+
+        card.rank === "Q"
+
+      ) {
+
+        queenPlayed = true;
+
+      }
+
+    }
+
+    setTwoPenalty(newTwo);
+
+    setTwoChain(newTwoChain);
+
+    setJackPenalty(newJack);
+
+    if (kingPlayed) {
+
+      setDirection(
+
+        newDirection
+
+      );
+
+    }
+
+    const actor =
+
+      actorName || current.name;
+
+    /*
+
+     * ACE
+
+     *
+
+     * The player must choose a suit.
+
+     * The turn does not move until that
+
+     * suit has been chosen.
+
+     */
+
+    if (acePlayed) {
+
+      setMessage(
+
+        `${actor} played an Ace — choose a suit.`
+
+      );
+
+      setQueenCoverTurn(false);
+
+      if (!humanTurn) {
+
+        const counts = {};
+
+        current.hand.forEach(
+
+          (card) => {
+
+            if (
+
+              !ids.includes(card.id)
+
+            ) {
+
+              counts[card.suit] =
+
+                (counts[card.suit] || 0) +
+
+                1;
+
+            }
+
+          }
+
+        );
+
+        const bestSuit =
+
+          Object.keys(counts).sort(
+
+            (a, b) =>
+
+              counts[b] -
+
+              counts[a]
+
+          )[0] || SUITS[0];
+
+        setTimeout(
+
+          () =>
+
+            chooseCpuSuit(
+
+              bestSuit,
+
+              actor
+
+            ),
+
+          700
+
+        );
+
+      }
+
+      return;
+
+    }
+
+    /*
+
+     * QUEEN
+
+     *
+
+     * IMPORTANT:
+
+     *
+
+     * A Queen can NEVER immediately
+
+     * win the round.
+
+     *
+
+     * The same player must cover it.
+
+     *
+
+     * If the Queen was their last card,
+
+     * they automatically pick up 1 card.
+
+     */
+
+    if (
+
+      queenPlayed &&
+
+      cards[
+
+        cards.length - 1
+
+      ].rank === "Q"
+
+    ) {
+
+      setQueenCoverTurn(true);
+
+      setTurn(turn);
+
+      setChosenSuit(null);
+
+      setSelectedCards([]);
+
+      if (newHand.length === 0) {
+
+        /*
+
+         * Queen was played as the last card.
+
+         * Do NOT finish the round.
+
+         *
+
+         * Draw one card immediately so the
+
+         * player has something to cover with.
+
+         */
+
+        let available = [...deck];
+
+        if (available.length < 1) {
+
+          available = [
+
+            ...available,
+
+            ...shuffle(
+
+              discard.slice(0, -1)
+
+            ),
+
+          ];
+
+        }
+
+        const picked =
+
+          available.slice(0, 1);
+
+        setDeck(
+
+          available.slice(
+
+            picked.length
+
+          )
+
+        );
+
+        setPlayers(
+
+          players.map(
+
+            (player, index) =>
+
+              index === turn
+
+                ? {
+
+                    ...player,
+
+                    hand: [
+
+                      ...player.hand,
+
+                      ...picked,
+
+                    ],
+
+                  }
+
+                : player
+
+          )
+
+        );
+
+        setMessage(
+
+          `${actor} played Queen as their last card — pick up 1 and cover the Queen.`
+
+        );
+
+      } else {
+
+        setMessage(
+
+          `${actor} played Queen — cover it with anything or a run.`
+
+        );
+
+      }
+
+      return;
+
+    }
+
+    /*
+
+     * If the Queen cover was already active,
+
+     * this card has now covered the Queen.
+
+     */
+
+    const wasQueenCover =
+
+      queenCoverTurn;
+
+    setQueenCoverTurn(false);
+
+    /*
+
+     * NORMAL WIN CHECK.
+
+     *
+
+     * This is deliberately AFTER the Queen
+
+     * check so a Queen can never win the round.
+
+     */
+
+    if (newHand.length === 0) {
+
+      finishRound(turn);
+
+      return;
+
+    }
+
+    if (redJackCancelled) {
+
+      setMessage(
+
+        `${actor} played Red Jack — Black Jack cancelled!`
+
+      );
+
+    } else if (
+
+      blackJackPlayed
+
+    ) {
+
+      setMessage(
+
+        `${actor} played Black Jack — next player picks up ${newJack} or plays Jack.`
+
+      );
+
+    } else if (twoPlayed) {
+
+      setMessage(
+
+        `${actor} played 2 — next player picks up ${newTwo} or plays 2.`
+
+      );
+
+    } else if (kingPlayed) {
+
+      setMessage(
+
+        `${actor} played King — direction reversed.`
+
+      );
+
+    } else if (eightPlayed) {
+
+      setMessage(
+
+        `${actor} played 8 — next player is skipped.`
+
+      );
+
+    } else if (
+
+      wasQueenCover
+
+    ) {
+
+      if (cards.length > 1) {
+
+        setMessage(
+
+          `${actor} covered the Queen with a run of ${cards.length} cards.`
+
+        );
+
+      } else {
+
+        setMessage(
+
+          `${actor} covered the Queen with ${cards[0].rank}${cards[0].suit}.`
+
+        );
+
+      }
+
+    } else if (
+
+      cards.length > 1
+
+    ) {
+
+      setMessage(
+
+        `${actor} played a run of ${cards.length} cards.`
+
+      );
+
+    } else {
+
+      setMessage(
+
+        `${actor} played ${cards[0].rank}${cards[0].suit}.`
+
+      );
+
+    }
+
+    const skip = eightPlayed;
+
+    const next =
+
+      getNextPlayer(
+
+        turn,
+
+        kingPlayed
+
+          ? newDirection
+
+          : direction,
+
+        skip
+
+      );
+
+    setTurn(next);
+
+    setChosenSuit(null);
+
+    setSelectedCards([]);
+
+  }
+
+  function playCard(card) {
+
+    playSequence([card]);
+
+  }
+
+  function playSelected() {
+
+    if (
+
+      !selectedCards.length ||
+
+      !current
+
+    ) {
+
+      return;
+
+    }
+
+    const cards =
+
+      selectedCards
+
+        .map((id) =>
+
+          current.hand.find(
+
+            (card) =>
+
+              card.id === id
+
+          )
+
+        )
+
+        .filter(Boolean);
+
+    playSequence(cards);
+
+  }
+
+  function chooseSuit(suit) {
+
+    if (
+
+      !topCard ||
+
+      topCard.rank !== "A" ||
+
+      !humanTurn
+
+    ) {
+
+      return;
+
+    }
+
+    setChosenSuit(suit);
+
+    const next =
+
+      getNextPlayer(
+
+        turn,
+
+        direction
+
+      );
+
+    setTurn(next);
+
+    setQueenCoverTurn(false);
+
+    setSelectedCards([]);
+
+    setMessage(
+
+      `You chose ${suit}. ${
+
+        players[next]?.name ||
+
+        "Next player"
+
+      }'s turn.`
+
+    );
+
+  }
+
+  function chooseCpuSuit(
+
+    suit,
+
+    actor = "CPU"
+
+  ) {
+
+    setChosenSuit(suit);
+
+    const next =
+
+      getNextPlayer(
+
+        turn,
+
+        direction
+
+      );
+
+    setTurn(next);
+
+    setQueenCoverTurn(false);
+
+    setSelectedCards([]);
+
+    setMessage(
+
+      `${actor} chose ${suit}. ${
+
+        players[next]?.name ||
+
+        "Your"
+
+      } turn.`
+
+    );
+
+  }
+
+  function callLastCard() {
+
+    if (
+
+      current &&
+
+      current.hand.length === 2
+
+    ) {
+
+      setMessage(
+
+        'You said "Last card!"'
+
+      );
+
+    }
+
+  }
+
+  /*
+
+   * CPU TURN
+
+   */
+
+  useEffect(() => {
+
+    if (
+
+      screen !== "game" ||
+
+      roundOver ||
+
+      humanTurn ||
+
+      !current
+
+    ) {
+
+      return;
+
+    }
+
+    const timer = setTimeout(() => {
+
+      /*
+
+       * CPU Queen cover.
+
+       */
+
+      if (queenCoverTurn) {
+
+        /*
+
+         * If CPU has no card because
+
+         * Queen was its last card,
+
+         * automatically pick up one.
+
+         */
+
+        if (!current.hand.length) {
+
+          drawCards(1);
+
+          return;
+
+        }
+
+        /*
+
+         * CPU can cover Queen with ANY card.
+
+         */
+
+        let run = [current.hand[0]];
+
+        for (
+
+          let i = 1;
+
+          i < current.hand.length;
+
+          i++
+
+        ) {
+
+          if (
+
+            canPlaySequence([
+
+              ...run,
+
+              current.hand[i],
+
+            ])
+
+          ) {
+
+            run.push(
+
+              current.hand[i]
+
+            );
+
+          }
+
+        }
+
+        playSequence(
+
+          run,
+
+          current.name
+
+        );
+
+        return;
+
+      }
+
+      /*
+
+       * Find normal legal cards.
+
+       */
+
+      const legal =
+
+        current.hand.filter(
+
+          (card) =>
+
+            canPlaySingle(card)
+
+        );
+
+      /*
+
+       * No legal card.
+
+       */
+
+      if (!legal.length) {
+
+        drawCards(
+
+          twoPenalty ||
+
+            jackPenalty ||
+
+            1
+
+        );
+
+        return;
+
+      }
+
+      /*
+
+       * CPU plays Ace first if available.
+
+       */
+
+      const ace =
+
+        legal.find(
+
+          (card) =>
+
+            card.rank === "A"
+
+        );
+
+      if (ace) {
+
+        playSequence(
+
+          [ace],
+
+          current.name
+
+        );
+
+        return;
+
+      }
+
+      /*
+
+       * Build a legal run.
+
+       */
+
+      let run = [legal[0]];
+
+      for (
+
+        let i = 1;
+
+        i < legal.length;
+
+        i++
+
+      ) {
+
+        if (
+
+          canPlaySequence([
+
+            ...run,
+
+            legal[i],
+
+          ])
+
+        ) {
+
+          run.push(
+
+            legal[i]
+
+          );
+
+        }
+
+      }
+
+      if (run.length > 1) {
+
+        playSequence(
+
+          run,
+
+          current.name
+
+        );
+
+      } else {
+
+        playSequence(
+
+          [run[0]],
+
+          current.name
+
+        );
+
+      }
+
+    }, 2200);
+
+    return () =>
+
+      clearTimeout(timer);
+
+  }, [
+
+    screen,
+
+    turn,
+
+    roundOver,
+
+    humanTurn,
+
+    current,
+
+    topCard,
+
+    twoPenalty,
+
+    jackPenalty,
+
+    chosenSuit,
+
+    queenCoverTurn,
+
+  ]);
+
+  /*
+
+   * HOME SCREEN
+
+   */
+
+  if (screen === "home") {
+
+    return (
+
+      <SafeAreaView style={styles.safe}>
+
+        <ScrollView
+
+          contentContainerStyle={
+
+            styles.homeScroll
+
+          }
+
+        >
+
+          <View style={styles.home}>
+
+            <Text style={styles.brand}>
+
+              HOME
+
+            </Text>
+
+            <Text
+
+              style={styles.brandGold}
+
+            >
+
+              BLACKJACK
+
+            </Text>
+
+            <Text
+
+              style={styles.subtitle}
+
+            >
+
+              BRITISH BLACKJACK
+
+            </Text>
+
+            <View style={styles.logo}>
+
+              <Text
+
+                style={styles.logoText}
+
+              >
+
+                ♠ ♥ ♦ ♣
+
+              </Text>
+
+            </View>
+
+            <Pressable
+
+              style={styles.primary}
+
+              onPress={() =>
+
+                startGame("cpu")
+
+              }
+
+            >
+
+              <Text
+
+                style={
+
+                  styles.primaryText
+
+                }
+
+              >
+
+                PLAY VS CPU
+
+              </Text>
+
+            </Pressable>
+
+            <Text style={styles.label}>
+
+              PASS & PLAY
+
+            </Text>
+
+            <View style={styles.row}>
+
+              {[2, 3, 4].map(
+
+                (number) => (
+
+                  <Pressable
+
+                    key={number}
+
+                    onPress={() =>
+
+                      setPlayerCount(
+
+                        number
+
+                      )
+
+                    }
+
+                    style={[
+
+                      styles.option,
+
+                      playerCount ===
+
+                        number &&
+
+                        styles.selected,
+
+                    ]}
+
+                  >
+
+                    <Text
+
+                      style={
+
+                        styles.buttonText
+
+                      }
+
+                    >
+
+                      {number}
+
+                    </Text>
+
+                  </Pressable>
+
+                )
+
+              )}
+
+            </View>
+
+            <Pressable
+
+              style={styles.secondary}
+
+              onPress={() =>
+
+                startGame("local")
+
+              }
+
+            >
+
+              <Text
+
+                style={
+
+                  styles.buttonText
+
+                }
+
+              >
+
+                START PASS & PLAY
+
+              </Text>
+
+            </Pressable>
+
+            <Pressable
+
+              style={
+
+                styles.rulesButton
+
+              }
+
+              onPress={() =>
+
+                setScreen("rules")
+
+              }
+
+            >
+
+              <Text
+
+                style={
+
+                  styles.rulesButtonText
+
+                }
+
+              >
+
+                📖 RULES
+
+              </Text>
+
+            </Pressable>
+
+            <View
+
+              style={
+
+                styles.homeFeature
+
+              }
+
+            >
+
+              <Text
+
+                style={
+
+                  styles.featureTitle
+
+                }
+
+              >
+
+                BRITISH BLACKJACK
+
+              </Text>
+
+              <Text
+
+                style={styles.muted}
+
+              >
+
+                Doubles • Runs • 2s •
+
+                Jacks • Queens • Kings •
+
+                8s • Aces
+
+              </Text>
+
+            </View>
+
+          </View>
+
+        </ScrollView>
+
+      </SafeAreaView>
+
+    );
+
+  }
+
+  /*
+
+   * RULES SCREEN
+
+   */
+
+  if (screen === "rules") {
+
+    return (
+
+      <SafeAreaView style={styles.safe}>
+
+        <View
+
+          style={
+
+            styles.rulesHeader
+
+          }
+
+        >
+
+          <Pressable
+
+            onPress={() =>
+
+              setScreen("home")
+
+            }
+
+          >
+
+            <Text
+
+              style={styles.homeLink}
+
+            >
+
+              ‹ HOME
+
+            </Text>
+
+          </Pressable>
+
+          <Text
+
+            style={styles.rulesTitle}
+
+          >
+
+            RULES
+
+          </Text>
+
+          <View
+
+            style={{ width: 55 }}
+
+          />
+
+        </View>
+
+        <ScrollView
+
+          contentContainerStyle={
+
+            styles.rulesPage
+
+          }
+
+        >
+
+          <Rule
+
+            title="THE AIM"
+
+            text="Be the first player to get rid of every card in your hand."
+
+          />
+
+          <Rule
+
+            title="THE DEAL"
+
+            text="Seven cards are dealt to each player. The remaining deck becomes the draw pile and one card is turned face up."
+
+          />
+
+          <Rule
+
+            title="PLAYING A CARD"
+
+            text="A card may normally be played when it matches the face-up card by rank or suit."
+
+          />
+
+          <Rule
+
+            title="DOUBLES & RUNS"
+
+            text="Select multiple cards and press PLAY SELECTED when the cards form a legal sequence."
+
+          />
+
+          <Rule
+
+            title="2"
+
+            text="A 2 makes the next player pick up two cards unless they play another 2. The penalty can build to eight."
+
+          />
+
+          <Rule
+
+            title="JACK"
+
+            text="A black Jack makes the next player pick up six unless they play another Jack. A red Jack cancels an active Black Jack."
+
+          />
+
+          <Rule
+
+            title="QUEEN"
+
+            text="When a player lays a Queen, that same player keeps the turn and must cover the Queen with ANY card or a run. A Queen cannot be the final winning card. If the Queen is your last card, you pick up one card and continue."
+
+          />
+
+          <Rule
+
+            title="KING"
+
+            text="A King reverses the direction of play."
+
+          />
+
+          <Rule
+
+            title="8"
+
+            text="An 8 makes the next player miss a turn."
+
+          />
+
+          <Rule
+
+            title="ACE"
+
+            text="An Ace lets the player choose the next suit. After a suit is chosen, the next player must play that suit or another Ace."
+
+          />
+
+          <Rule
+
+            title="LAST CARD"
+
+            text='When you have two cards and are about to play one, say "Last card!" before the next player acts.'
+
+          />
+
+          <Rule
+
+            title="WINNING"
+
+            text="The first player to get rid of all their cards wins the round."
+
+          />
+
+          <Rule
+
+            title="DRAW PILE"
+
+            text="When the draw pile runs out, used cards are reshuffled while the current top card remains face up."
+
+          />
+
+          <Text
+
+            style={styles.rulesFooter}
+
+          >
+
+            HOME BLACKJACK
+
+          </Text>
+
+        </ScrollView>
+
+      </SafeAreaView>
+
+    );
+
+  }
+
+  /*
+
+   * ROUND OVER
+
+   */
+
+  if (roundOver) {
+
+    return (
+
+      <SafeAreaView style={styles.safe}>
+
+        <View style={styles.home}>
+
+          <Text style={styles.trophy}>
+
+            🏆
+
+          </Text>
+
+          <Text
+
+            style={styles.winner}
+
+          >
+
+            {gameWinner
+
+              ? `${gameWinner} WINS THE GAME`
+
+              : `${players[turn]?.name} WINS THE ROUND`}
+
+          </Text>
+
+          <View
+
+            style={styles.scoreBox}
+
+          >
+
+            {players.map(
+
+              (player, index) => (
+
+                <Text
+
+                  key={index}
+
+                  style={styles.score}
+
+                >
+
+                  {player.name}:{" "}
+
+                  {scores[index] || 0}{" "}
+
+                  points
+
+                </Text>
+
+              )
+
+            )}
+
+          </View>
+
+          <Pressable
+
+            style={styles.primary}
+
+            onPress={() =>
+
+              startGame(mode)
+
+            }
+
+          >
+
+            <Text
+
+              style={
+
+                styles.primaryText
+
+              }
+
+            >
+
+              PLAY AGAIN
+
+            </Text>
+
+          </Pressable>
+
+          <Pressable
+
+            style={styles.secondary}
+
+            onPress={() =>
+
+              setScreen("home")
+
+            }
+
+          >
+
+            <Text
+
+              style={
+
+                styles.buttonText
+
+              }
+
+            >
+
+              HOME
+
+            </Text>
+
+          </Pressable>
+
+        </View>
+
+      </SafeAreaView>
+
+    );
+
+  }
+
+  /*
+
+   * GAME SCREEN
+
+   */
+
+  return (
+
+    <SafeAreaView style={styles.safe}>
+
+      <View
+
+        style={styles.gameHeader}
+
+      >
+
+        <Pressable
+
+          style={
+
+            styles.homeGameButton
+
+          }
+
+          onPress={leaveGame}
+
+        >
+
+          <Text
+
+            style={
+
+              styles.homeGameText
+
+            }
+
+          >
+
+            🏠 HOME
+
+          </Text>
+
+        </Pressable>
+
+        <View
+
+          style={styles.gameBrand}
+
+        >
+
+          <Text
+
+            style={
+
+              styles.gameBrandTop
+
+            }
+
+          >
+
+            HOME
+
+          </Text>
+
+          <Text
+
+            style={
+
+              styles.gameBrandBottom
+
+            }
+
+          >
+
+            BLACKJACK
+
+          </Text>
+
+        </View>
+
+        <Text style={styles.cpu}>
+
+          {mode === "cpu"
+
+            ? "CPU"
+
+            : "PASS"}
+
+        </Text>
+
+      </View>
+
+      <View style={styles.table}>
+
+        <View
+
+          style={styles.opponent}
+
+        >
+
+          <View
+
+            style={
+
+              styles.playerBadge
+
+            }
+
+          >
+
+            <Text
+
+              style={
+
+                styles.playerBadgeText
+
+              }
+
+            >
+
+              CPU
+
+            </Text>
+
+          </View>
+
+          <View
+
+            style={styles.cpuRow}
+
+          >
+
+            {players[1]?.hand.map(
+
+              (_, index) => (
+
+                <View
+
+                  key={index}
+
+                  style={{
+
+                    marginLeft:
+
+                      index === 0
+
+                        ? 0
+
+                        : -13,
+
+                  }}
+
+                >
+
+                  <Card
+
+                    back
+
+                    small
+
+                  />
+
+                </View>
+
+              )
+
+            )}
+
+          </View>
+
+        </View>
+
+        <View style={styles.center}>
+
+          <Text
+
+            style={styles.message}
+
+          >
+
+            {message}
+
+          </Text>
+
+          <View
+
+            style={styles.piles}
+
+          >
+
+            <View style={styles.pile}>
+
+              <Text
+
+                style={
+
+                  styles.pileLabel
+
+                }
+
+              >
+
+                DRAW
+
+              </Text>
+
+              <Card back />
+
+            </View>
+
+            <View style={styles.pile}>
+
+              <Text
+
+                style={
+
+                  styles.pileLabel
+
+                }
+
+              >
+
+                PLAY
+
+              </Text>
+
+              {topCard && (
+
+                <Card
+
+                  card={topCard}
+
+                />
+
+              )}
+
+            </View>
+
+          </View>
+
+          <Text
+
+            style={styles.status}
+
+          >
+
+            {twoPenalty
+
+              ? `⚠ PICK UP ${twoPenalty} OR PLAY 2`
+
+              : jackPenalty
+
+              ? `⚠ PICK UP ${jackPenalty} OR PLAY JACK`
+
+              : chosenSuit
+
+              ? `SUIT: ${chosenSuit}`
+
+              : queenCoverTurn
+
+              ? "♛ QUEEN COVER — PLAY ANYTHING"
+
+              : ""}
+
+          </Text>
+
+        </View>
+
+        <View
+
+          style={styles.handArea}
+
+        >
+
+          <Text
+
+            style={styles.yourTurn}
+
+          >
+
+            {humanTurn
+
+              ? "YOUR HAND"
+
+              : "CPU THINKING…"}
+
+          </Text>
+
+          {humanTurn && (
+
+            <View style={styles.hand}>
+
+              {current.hand.map(
+
+                (card, index) => (
+
+                  <DraggableCard
+
+                    key={card.id}
+
+                    card={card}
+
+                    index={index}
+
+                    selected={selectedCards.includes(
+
+                      card.id
+
+                    )}
+
+                    onPlay={playCard}
+
+                    onMove={moveCard}
+
+                    onSelect={selectCard}
+
+                  />
+
+                )
+
+              )}
+
+            </View>
+
+          )}
+
+          {humanTurn &&
+
+            selectedCards.length >
+
+              0 && (
+
+              <Pressable
+
+                style={
+
+                  styles.playSelected
+
+                }
+
+                onPress={
+
+                  playSelected
+
+                }
+
+              >
+
+                <Text
+
+                  style={
+
+                    styles.primaryText
+
+                  }
+
+                >
+
+                  PLAY SELECTED (
+
+                  {selectedCards.length})
+
+                </Text>
+
+              </Pressable>
+
+            )}
+
+          {humanTurn &&
+
+            current.hand.length ===
+
+              2 && (
+
+              <Pressable
+
+                style={styles.last}
+
+                onPress={
+
+                  callLastCard
+
+                }
+
+              >
+
+                <Text
+
+                  style={
+
+                    styles.buttonText
+
+                  }
+
+                >
+
+                  SAY "LAST CARD"
+
+                </Text>
+
+              </Pressable>
+
+            )}
+
+          /*
+
+           * ACE SUIT BUTTONS
+
+           *
+
+           * They only appear when:
+
+           * - It is your turn
+
+           * - The top card is an Ace
+
+           * - No suit has already been chosen
+
+           */
+
+          {topCard &&
+
+            topCard.rank === "A" &&
+
+            humanTurn &&
+
+            !chosenSuit && (
+
+              <View
+
+                style={
+
+                  styles.suitRow
+
+                }
+
+              >
+
+                {SUITS.map(
+
+                  (suit) => (
+
+                    <Pressable
+
+                      key={suit}
+
+                      style={[
+
+                        styles.suitButton,
+
+                        suit === "♥" &&
+
+                          styles.heartButton,
+
+                        suit === "♦" &&
+
+                          styles.diamondButton,
+
+                        suit === "♣" &&
+
+                          styles.clubButton,
+
+                        suit === "♠" &&
+
+                          styles.spadeButton,
+
+                      ]}
+
+                      onPress={() =>
+
+                        chooseSuit(
+
+                          suit
+
+                        )
+
+                      }
+
+                    >
+
+                      <Text
+
+                        style={
+
+                          styles.suitButtonText
+
+                        }
+
+                      >
+
+                        {suit}
+
+                      </Text>
+
+                      <Text
+
+                        style={
+
+                          styles.suitButtonLabel
+
+                        }
+
+                      >
+
+                        {suit === "♥"
+
+                          ? "HEARTS"
+
+                          : suit === "♦"
+
+                          ? "DIAMONDS"
+
+                          : suit === "♣"
+
+                          ? "CLUBS"
+
+                          : "SPADES"}
+
+                      </Text>
+
+                    </Pressable>
+
+                  )
+
+                )}
+
+              </View>
+
+            )}
+
+          <Pressable
+
+            style={styles.draw}
+
+            onPress={() =>
+
+              humanTurn &&
+
+              drawCards(
+
+                queenCoverTurn
+
+                  ? 1
+
+                  : twoPenalty ||
+
+                    jackPenalty ||
+
+                    1
+
+              )
+
+            }
+
+          >
+
+            <Text
+
+              style={styles.buttonText}
+
+            >
+
+              {queenCoverTurn
+
+                ? "PICK UP 1"
+
+                : twoPenalty
+
+                ? `PICK UP ${twoPenalty}`
+
+                : jackPenalty
+
+                ? `PICK UP ${jackPenalty}`
+
+                : "PICK UP 1"}
+
+            </Text>
+
+          </Pressable>
+
+        </View>
+
+      </View>
+
+    </SafeAreaView>
+
+  );
+
+}
+
+const styles = StyleSheet.create({
+
+  safe: {
+
+    flex: 1,
+
+    backgroundColor: "#061d13",
+
+  },
+
+  homeScroll: {
+
+    flexGrow: 1,
+
+  },
+
+  home: {
+
+    flex: 1,
+
+    justifyContent: "center",
+
+    padding: 20,
+
+  },
+
+  brand: {
+
+    color: "#f5f0e5",
+
+    fontSize: 38,
+
+    fontWeight: "900",
+
+    textAlign: "center",
+
+    letterSpacing: 5,
+
+  },
+
+  brandGold: {
+
+    color: "#d6b56a",
+
+    fontSize: 35,
+
+    fontWeight: "900",
+
+    textAlign: "center",
+
+    letterSpacing: 2,
+
+  },
+
+  subtitle: {
+
+    color: "#a9bdaf",
+
+    textAlign: "center",
+
+    fontSize: 15,
+
+    fontWeight: "800",
+
+    letterSpacing: 3,
+
+    marginVertical: 14,
+
+  },
+
+  logo: {
+
+    alignSelf: "center",
+
+    backgroundColor: "#0b4a2d",
+
+    borderWidth: 2,
+
+    borderColor: "#c6a35b",
+
+    borderRadius: 60,
+
+    padding: 22,
+
+    marginBottom: 5,
+
+    shadowColor: "#000",
+
+    shadowOpacity: 0.5,
+
+    shadowRadius: 8,
+
+    elevation: 8,
+
+  },
+
+  logoText: {
+
+    fontSize: 27,
+
+    color: "#f5f0e5",
+
+    letterSpacing: 3,
+
+  },
+
+  primary: {
+
+    backgroundColor: "#c9a45b",
+
+    padding: 17,
+
+    borderRadius: 12,
+
+    alignItems: "center",
+
+    marginTop: 14,
+
+    borderWidth: 1,
+
+    borderColor: "#f1d990",
+
+  },
+
+  primaryText: {
+
+    color: "#171209",
+
+    fontWeight: "900",
+
+    fontSize: 17,
+
+  },
+
+  secondary: {
+
+    backgroundColor: "#123b29",
+
+    padding: 15,
+
+    borderRadius: 12,
+
+    alignItems: "center",
+
+    marginTop: 9,
+
+    borderWidth: 1,
+
+    borderColor: "#4f705d",
+
+  },
+
+  label: {
+
+    color: "#e5eee7",
+
+    fontWeight: "900",
+
+    marginTop: 18,
+
+    marginBottom: 8,
+
+    letterSpacing: 1,
+
+  },
+
+  row: {
+
+    flexDirection: "row",
+
+    gap: 6,
+
+    marginTop: 5,
+
+  },
+
+  option: {
+
+    flex: 1,
+
+    backgroundColor: "#123b29",
+
+    padding: 13,
+
+    borderRadius: 10,
+
+    alignItems: "center",
+
+    borderWidth: 1,
+
+    borderColor: "#416651",
+
+  },
+
+  selected: {
+
+    backgroundColor: "#765c31",
+
+    borderColor: "#d5b76f",
+
+  },
+
+  buttonText: {
+
+    color: "#fff",
+
+    fontWeight: "900",
+
+  },
+
+  rulesButton: {
+
+    marginTop: 12,
+
+    padding: 14,
+
+    alignItems: "center",
+
+    borderRadius: 12,
+
+    backgroundColor: "#0b2d1e",
+
+    borderWidth: 1,
+
+    borderColor: "#c6a35b",
+
+  },
+
+  rulesButtonText: {
+
+    color: "#d6b56a",
+
+    fontSize: 16,
+
+    fontWeight: "900",
+
+    letterSpacing: 1,
+
+  },
+
+  homeFeature: {
+
+    backgroundColor: "#071f15",
+
+    padding: 15,
+
+    borderRadius: 14,
+
+    marginTop: 18,
+
+    borderWidth: 1,
+
+    borderColor: "#294936",
+
+    alignItems: "center",
+
+  },
+
+  featureTitle: {
+
+    color: "#f1e6c9",
+
+    fontWeight: "900",
+
+    marginBottom: 6,
+
+    letterSpacing: 1,
+
+  },
+
+  muted: {
+
+    color: "#aebfb3",
+
+    lineHeight: 21,
+
+    textAlign: "center",
+
+  },
+
+  rulesHeader: {
+
+    padding: 14,
+
+    flexDirection: "row",
+
+    justifyContent: "space-between",
+
+    alignItems: "center",
+
+    backgroundColor: "#082519",
+
+    borderBottomWidth: 1,
+
+    borderColor: "#4b654f",
+
+  },
+
+  homeLink: {
+
+    color: "#d6b56a",
+
+    fontWeight: "900",
+
+    width: 55,
+
+  },
+
+  rulesTitle: {
+
+    color: "#f5f0e5",
+
+    fontSize: 20,
+
+    fontWeight: "900",
+
+    letterSpacing: 2,
+
+  },
+
+  rulesPage: {
+
+    padding: 15,
+
+    paddingBottom: 40,
+
+  },
+
+  ruleCard: {
+
+    backgroundColor: "#0a291b",
+
+    padding: 15,
+
+    borderRadius: 13,
+
+    marginBottom: 10,
+
+    borderWidth: 1,
+
+    borderColor: "#294936",
+
+  },
+
+  ruleCardTitle: {
+
+    color: "#d6b56a",
+
+    fontSize: 16,
+
+    fontWeight: "900",
+
+    marginBottom: 6,
+
+    letterSpacing: 1,
+
+  },
+
+  ruleCardText: {
+
+    color: "#d4dfd7",
+
+    lineHeight: 22,
+
+    fontSize: 14,
+
+  },
+
+  rulesFooter: {
+
+    color: "#d6b56a",
+
+    textAlign: "center",
+
+    fontWeight: "900",
+
+    marginTop: 12,
+
+    letterSpacing: 2,
+
+  },
+
+  gameHeader: {
+
+    padding: 10,
+
+    flexDirection: "row",
+
+    justifyContent: "space-between",
+
+    alignItems: "center",
+
+    backgroundColor: "#071f15",
+
+    borderBottomWidth: 1,
+
+    borderColor: "#4b654f",
+
+  },
+
+  homeGameButton: {
+
+    backgroundColor: "#123b29",
+
+    paddingVertical: 8,
+
+    paddingHorizontal: 10,
+
+    borderRadius: 9,
+
+    borderWidth: 1,
+
+    borderColor: "#c6a35b",
+
+  },
+
+  homeGameText: {
+
+    color: "#e7cf91",
+
+    fontSize: 11,
+
+    fontWeight: "900",
+
+  },
+
+  gameBrand: {
+
+    alignItems: "center",
+
+  },
+
+  gameBrandTop: {
+
+    color: "#fff",
+
+    fontSize: 12,
+
+    fontWeight: "900",
+
+    letterSpacing: 2,
+
+  },
+
+  gameBrandBottom: {
+
+    color: "#d6b56a",
+
+    fontSize: 14,
+
+    fontWeight: "900",
+
+    letterSpacing: 1,
+
+  },
+
+  cpu: {
+
+    color: "#d5b76f",
+
+    fontWeight: "900",
+
+    fontSize: 12,
+
+  },
+
+  table: {
+
+    flex: 1,
+
+    backgroundColor: "#07512f",
+
+    margin: 5,
+
+    borderRadius: 25,
+
+    borderWidth: 2,
+
+    borderColor: "#1d7448",
+
+    overflow: "hidden",
+
+  },
+
+  opponent: {
+
+    padding: 7,
+
+    alignItems: "center",
+
+    minHeight: 80,
+
+  },
+
+  playerBadge: {
+
+    backgroundColor: "#0b291b",
+
+    paddingHorizontal: 13,
+
+    paddingVertical: 4,
+
+    borderRadius: 15,
+
+    borderWidth: 1,
+
+    borderColor: "#b99651",
+
+  },
+
+  playerBadgeText: {
+
+    color: "#f5f0e5",
+
+    fontWeight: "900",
+
+    fontSize: 11,
+
+  },
+
+  cpuRow: {
+
+    flexDirection: "row",
+
+    marginTop: 5,
+
+    justifyContent: "center",
+
+  },
+
+  center: {
+
+    flex: 1,
+
+    alignItems: "center",
+
+    justifyContent: "center",
+
+  },
+
+  message: {
+
+    color: "#f4f1e8",
+
+    fontSize: 15,
+
+    fontWeight: "800",
+
+    textAlign: "center",
+
+    paddingHorizontal: 12,
+
+    marginBottom: 10,
+
+  },
+
+  piles: {
+
+    flexDirection: "row",
+
+    gap: 28,
+
+    alignItems: "center",
+
+  },
+
+  pile: {
+
+    alignItems: "center",
+
+  },
+
+  pileLabel: {
+
+    color: "#c6d5ca",
+
+    fontSize: 10,
+
+    fontWeight: "900",
+
+    textAlign: "center",
+
+    marginBottom: 4,
+
+    letterSpacing: 1,
+
+  },
+
+  status: {
+
+    color: "#f4d98b",
+
+    fontWeight: "900",
+
+    marginTop: 9,
+
+    textAlign: "center",
+
+  },
+
+  handArea: {
+
+    backgroundColor: "#061f14",
+
+    padding: 8,
+
+    borderTopWidth: 1,
+
+    borderColor: "#55735f",
+
+    minHeight: 215,
+
+  },
+
+  yourTurn: {
+
+    color: "#f1e6c9",
+
+    fontWeight: "900",
+
+    textAlign: "center",
+
+    marginBottom: 5,
+
+    fontSize: 12,
+
+    letterSpacing: 1,
+
+  },
+
+  hand: {
+
+    flexDirection: "row",
+
+    flexWrap: "wrap",
+
+    justifyContent: "center",
+
+    alignItems: "flex-end",
+
+    minHeight: 80,
+
+  },
+
+  dragCard: {
+
+    width: 48,
+
+    height: 76,
+
+    marginHorizontal: 1,
+
+  },
+
+  draggingCard: {
+
+    zIndex: 100,
+
+  },
+
+  card: {
+
+    width: 48,
+
+    height: 76,
+
+    backgroundColor: "#faf8f0",
+
+    borderRadius: 8,
+
+    borderWidth: 1,
+
+    borderColor: "#d1c6a9",
+
+    padding: 5,
+
+    justifyContent: "space-between",
+
+    shadowColor: "#000",
+
+    shadowOpacity: 0.45,
+
+    shadowRadius: 4,
+
+    elevation: 5,
+
+  },
+
+  smallCard: {
+
+    width: 34,
+
+    height: 48,
+
+    padding: 3,
+
+  },
+
+  cardBack: {
+
+    backgroundColor: "#153f2b",
+
+    borderColor: "#c9a45b",
+
+    alignItems: "center",
+
+    justifyContent: "center",
+
+  },
+
+  backMark: {
+
+    color: "#d8bd78",
+
+    fontSize: 18,
+
+    fontWeight: "900",
+
+  },
+
+  backMarkSmall: {
+
+    color: "#d8bd78",
+
+    fontSize: 6,
+
+    fontWeight: "900",
+
+  },
+
+  selectedCard: {
+
+    borderWidth: 3,
+
+    borderColor: "#e0c36f",
+
+    transform: [
+
+      {
+
+        translateY: -8,
+
+      },
+
+    ],
+
+  },
+
+  rank: {
+
+    color: "#161616",
+
+    fontSize: 15,
+
+    fontWeight: "900",
+
+  },
+
+  suit: {
+
+    color: "#161616",
+
+    fontSize: 22,
+
+    textAlign: "center",
+
+  },
+
+  cornerSuit: {
+
+    color: "#161616",
+
+    fontSize: 10,
+
+    textAlign: "right",
+
+  },
+
+  red: {
+
+    color: "#b52d2d",
+
+  },
+
+  playSelected: {
+
+    backgroundColor: "#c9a45b",
+
+    padding: 10,
+
+    borderRadius: 10,
+
+    alignItems: "center",
+
+    marginTop: 4,
+
+    borderWidth: 1,
+
+    borderColor: "#f1d990",
+
+  },
+
+  last: {
+
+    backgroundColor: "#765c31",
+
+    padding: 9,
+
+    borderRadius: 10,
+
+    alignItems: "center",
+
+    marginTop: 5,
+
+  },
+
+  draw: {
+
+    backgroundColor: "#123b29",
+
+    borderWidth: 1,
+
+    borderColor: "#66816d",
+
+    padding: 11,
+
+    borderRadius: 10,
+
+    alignItems: "center",
+
+    marginTop: 5,
+
+  },
+
+  suitRow: {
+
+    flexDirection: "row",
+
+    justifyContent: "center",
+
+    gap: 7,
+
+    marginTop: 7,
+
+  },
+
+  suitButton: {
+
+    width: 68,
+
+    height: 61,
+
+    borderRadius: 13,
+
+    alignItems: "center",
+
+    justifyContent: "center",
+
+    borderWidth: 2,
+
+    shadowColor: "#000",
+
+    shadowOpacity: 0.55,
+
+    shadowRadius: 4,
+
+    elevation: 7,
+
+  },
+
+  heartButton: {
+
+    backgroundColor: "#b52d2d",
+
+    borderColor: "#ff8b8b",
+
+  },
+
+  diamondButton: {
+
+    backgroundColor: "#d24747",
+
+    borderColor: "#ff9b9b",
+
+  },
+
+  clubButton: {
+
+    backgroundColor: "#162f4d",
+
+    borderColor: "#6fa4df",
+
+  },
+
+  spadeButton: {
+
+    backgroundColor: "#101b2b",
+
+    borderColor: "#7f9fbd",
+
+  },
+
+  suitButtonText: {
+
+    color: "#fff",
+
+    fontSize: 27,
+
+    fontWeight: "900",
+
+    textShadowColor: "#000",
+
+    textShadowOffset: {
+
+      width: 1,
+
+      height: 2,
+
+    },
+
+    textShadowRadius: 2,
+
+  },
+
+  suitButtonLabel: {
+
+    color: "#fff",
+
+    fontSize: 7,
+
+    fontWeight: "900",
+
+    letterSpacing: 0.5,
+
+  },
+
+  trophy: {
+
+    fontSize: 64,
+
+    textAlign: "center",
+
+  },
+
+  winner: {
+
+    color: "#f4f1e8",
+
+    fontSize: 24,
+
+    fontWeight: "900",
+
+    textAlign: "center",
+
+    marginVertical: 18,
+
+  },
+
+  scoreBox: {
+
+    backgroundColor: "#062a1a",
+
+    padding: 18,
+
+    borderRadius: 14,
+
+    width: "100%",
+
+    borderWidth: 1,
+
+    borderColor: "#5d754f",
+
+  },
+
+  score: {
+
+    color: "#fff",
+
+    fontSize: 18,
+
+    fontWeight: "800",
+
+    marginBottom: 8,
+
+  },
+
+});
